@@ -1,22 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Calendar, BookOpen, Users, Home, Clock, MapPin, 
+import {
+  Calendar, BookOpen, Users, Home, Clock, MapPin,
   User, Plus, Trash2, Edit, Lock, LogOut, X, Save,
   Download, Smartphone, HelpCircle, Share2, Copy, Loader2
 } from 'lucide-react';
 
 // --- IMPORT FIREBASE ---
-// Pastikan Anda sudah install: npm install firebase
 import { initializeApp } from "firebase/app";
-import { 
-  getFirestore, collection, addDoc, updateDoc, deleteDoc, 
-  doc, onSnapshot, query, orderBy 
+import {
+  getFirestore, collection, addDoc, updateDoc, deleteDoc,
+  doc, onSnapshot, query, orderBy
 } from "firebase/firestore";
 
 // --- KONFIGURASI FIREBASE ---
-// 1. Buka console.firebase.google.com
-// 2. Buat Project Baru -> Pilih Web (icon </> )
-// 3. Copy "firebaseConfig" Anda dan PASTE di bawah ini menggantikan area yang saya tandai:
+// PENTING: PASTE ULANG CONFIG FIREBASE ANDA DI SINI
 const firebaseConfig = {
   apiKey: "AIzaSyAa1lp3K7z5k-IPvx0YPtzhr1vPk9ouHtg",
   authDomain: "info-masjid-albarkah.firebaseapp.com",
@@ -26,7 +23,7 @@ const firebaseConfig = {
   appId: "1:520006889582:web:08ba9c0368c000604ff67f"
 };
 
-// Inisialisasi Database (Cek agar tidak error saat config belum diisi)
+// Inisialisasi Database
 let db;
 try {
   const app = initializeApp(firebaseConfig);
@@ -36,8 +33,8 @@ try {
 }
 
 // --- KONFIGURASI ADMIN ---
-const ADMIN_PIN = 'Albarkah2026'; 
-const ADMIN_WA = '6285137666570'; 
+const ADMIN_PIN = '1234';
+const ADMIN_WA = '628123456789';
 
 const App = () => {
   const [activeTab, setActiveTab] = useState('home');
@@ -46,29 +43,82 @@ const App = () => {
   const [showInstall, setShowInstall] = useState(false);
   const [showShare, setShowShare] = useState(false);
   const [pinInput, setPinInput] = useState('');
-  
+
   // Loading State
   const [loading, setLoading] = useState(true);
 
-  // Data State (Kosongkan awal, karena akan diisi dari Database)
+  // Data State
   const [fridayData, setFridayData] = useState([]);
   const [studyData, setStudyData] = useState([]);
   const [activityData, setActivityData] = useState([]);
 
+  // State Jadwal Sholat
+  const [nextPrayer, setNextPrayer] = useState({ name: 'Memuat...', time: '--:--' });
+
   // Modal State
   const [showModal, setShowModal] = useState(false);
-  const [modalType, setModalType] = useState(''); 
-  const [editingItem, setEditingItem] = useState(null); 
+  const [modalType, setModalType] = useState('');
+  const [editingItem, setEditingItem] = useState(null);
   const [formData, setFormData] = useState({});
 
-  // --- 1. MEMBACA DATA DARI DATABASE (REALTIME) ---
+  // --- 1. LOGIKA JADWAL SHOLAT OTOMATIS (API) ---
+  useEffect(() => {
+    const fetchPrayerTimes = async () => {
+      try {
+        // Mengambil data untuk Kota Bandung, Metode Kemenag RI (Method 20)
+        const response = await fetch(`https://api.aladhan.com/v1/timingsByCity?city=Bandung&country=Indonesia&method=20`);
+        const data = await response.json();
+        const timings = data.data.timings;
+
+        const prayers = [
+          { name: 'Subuh', time: timings.Fajr },
+          { name: 'Dzuhur', time: timings.Dhuhr },
+          { name: 'Ashar', time: timings.Asr },
+          { name: 'Maghrib', time: timings.Maghrib },
+          { name: 'Isya', time: timings.Isha },
+        ];
+
+        // Cari Sholat Berikutnya
+        const now = new Date();
+        const currentMinutes = now.getHours() * 60 + now.getMinutes();
+        let foundNext = null;
+
+        for (let p of prayers) {
+          const [h, m] = p.time.split(':').map(Number);
+          const prayerMinutes = h * 60 + m;
+
+          if (prayerMinutes > currentMinutes) {
+            foundNext = p;
+            break;
+          }
+        }
+
+        // Jika semua lewat (misal jam 22.00), berarti next adalah Subuh Besok
+        if (!foundNext) {
+          foundNext = { name: 'Subuh (Besok)', time: timings.Fajr };
+        }
+
+        setNextPrayer(foundNext);
+
+      } catch (error) {
+        console.error("Gagal ambil jadwal sholat", error);
+        setNextPrayer({ name: 'Jadwal', time: 'Offline' });
+      }
+    };
+
+    fetchPrayerTimes();
+    // Update setiap 1 menit untuk cek pergantian waktu
+    const interval = setInterval(fetchPrayerTimes, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // --- 2. MEMBACA DATA DARI DATABASE (REALTIME) ---
   useEffect(() => {
     if (!db) {
       setLoading(false);
       return;
     }
 
-    // Ambil Data Jumat
     const qJumat = query(collection(db, "jumat"), orderBy("date", "asc"));
     const unsubJumat = onSnapshot(qJumat, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -76,21 +126,18 @@ const App = () => {
       setLoading(false);
     });
 
-    // Ambil Data Kajian
     const qKajian = query(collection(db, "kajian"), orderBy("day", "desc"));
     const unsubKajian = onSnapshot(qKajian, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setStudyData(data);
     });
 
-    // Ambil Data Kegiatan
     const qKegiatan = query(collection(db, "kegiatan"), orderBy("date", "asc"));
     const unsubKegiatan = onSnapshot(qKegiatan, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setActivityData(data);
     });
 
-    // Bersihkan listener saat aplikasi ditutup
     return () => {
       unsubJumat();
       unsubKajian();
@@ -116,18 +163,15 @@ const App = () => {
   };
 
   // --- LOGIC CRUD KE DATABASE ---
-  
-  // 1. Delete (Hapus dari Firebase)
   const handleDelete = async (type, id) => {
     if (!window.confirm('Yakin ingin menghapus data ini?')) return;
     try {
-      await deleteDoc(doc(db, type, id)); // type harus sama dengan nama koleksi (jumat/kajian/kegiatan)
+      await deleteDoc(doc(db, type, id));
     } catch (e) {
       alert("Gagal menghapus: " + e.message);
     }
   };
 
-  // 2. Open Modal
   const openModal = (type, item = null) => {
     setModalType(type);
     setEditingItem(item);
@@ -135,20 +179,15 @@ const App = () => {
     setFormData(item ? { ...item } : {});
   };
 
-  // 3. Save Data (Simpan ke Firebase)
   const handleSave = async (e) => {
     e.preventDefault();
     if (!db) return alert("Database belum terhubung! Cek file App.jsx");
-
-    const collectionName = modalType; // jumat, kajian, atau kegiatan
-
+    const collectionName = modalType;
     try {
       if (editingItem) {
-        // UPDATE Data Lama
         const docRef = doc(db, collectionName, editingItem.id);
         await updateDoc(docRef, formData);
       } else {
-        // TAMBAH Data Baru
         await addDoc(collection(db, collectionName), formData);
       }
       setShowModal(false);
@@ -161,28 +200,18 @@ const App = () => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  // --- LOGIC SHARE (Sama seperti sebelumnya) ---
+  // --- LOGIC SHARE ---
   const generateShareText = () => {
     const nextFriday = fridayData.length > 0 ? fridayData[0] : null;
     const nextKajian = studyData.length > 0 ? studyData[0] : null;
-    const url = window.location.href; 
-
-    let text = `*🕌 Info Masjid Jami Albarkah 🕌*\nJl. Gegerkalong Hilir No.112 B\n\n`;
-    text += `Assalamu'alaikum, berikut jadwal kegiatan masjid terkini:\n\n`;
-
+    const url = window.location.href;
+    let text = `*🕌 Info Masjid Jami Albarkah 🕌*\nJl. Gegerkalong Hilir No.112 B\n\nAssalamu'alaikum, berikut jadwal kegiatan masjid terkini:\n\n`;
     if (nextFriday) {
-      text += `*🗓️ Jumat, ${nextFriday.date}*\n`;
-      text += `👤 Khotib: ${nextFriday.khotib}\n`;
-      text += `🎤 Muadzin: ${nextFriday.muadzin}\n\n`;
+      text += `*🗓️ Jumat, ${nextFriday.date}*\n👤 Khotib: ${nextFriday.khotib}\n🎤 Muadzin: ${nextFriday.muadzin}\n\n`;
     }
-
     if (nextKajian) {
-      text += `*📚 Kajian Terdekat*\n`;
-      text += `📖 Materi: ${nextKajian.title}\n`;
-      text += `👳 Pemateri: ${nextKajian.speaker}\n`;
-      text += `⏰ Waktu: ${nextKajian.day}, ${nextKajian.time}\n\n`;
+      text += `*📚 Kajian Terdekat*\n📖 Materi: ${nextKajian.title}\n👳 Pemateri: ${nextKajian.speaker}\n⏰ Waktu: ${nextKajian.day}, ${nextKajian.time}\n\n`;
     }
-
     text += `📲 *Lihat jadwal lengkap & install aplikasi:* \n${url}`;
     return text;
   };
@@ -200,8 +229,6 @@ const App = () => {
   };
 
   // --- COMPONENTS (UI) ---
-  // (UI relatif sama, hanya ditambah Loading State)
-
   const BottomNav = () => (
     <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around py-3 px-2 shadow-lg z-40 max-w-md mx-auto">
       {['home', 'jumat', 'kajian', 'kegiatan'].map((tab) => (
@@ -244,7 +271,6 @@ const App = () => {
   );
 
   // --- VIEWS ---
-
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50"><Loader2 className="animate-spin text-emerald-600" size={40} /></div>;
 
   const HomeView = () => (
@@ -253,10 +279,17 @@ const App = () => {
         <AdminButton />
         <h1 className="text-2xl font-bold pr-28">Masjid Jami Albarkah</h1>
         <p className="text-emerald-100 text-sm mt-1">Jl. Gegerkalong Hilir No.112 B</p>
+
+        {/* WIDGET JADWAL SHOLAT OTOMATIS */}
         <div className="mt-6 bg-white/10 backdrop-blur-sm p-4 rounded-xl border border-white/20">
-          <div className="flex justify-between items-center mb-2"><span className="text-xs font-semibold uppercase tracking-wider text-emerald-100">Jadwal Sholat</span><Clock size={16} className="text-emerald-100" /></div>
-          <div className="text-3xl font-bold">Ashar</div><div className="text-lg">15:15 WIB</div>
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-emerald-100">Jadwal Sholat Selanjutnya</span>
+            <Clock size={16} className="text-emerald-100" />
+          </div>
+          <div className="text-3xl font-bold">{nextPrayer.name}</div>
+          <div className="text-lg">{nextPrayer.time} WIB</div>
         </div>
+
         {isAdmin && <div className="mt-4 bg-yellow-500/20 border border-yellow-200/50 p-2 rounded-lg text-center text-xs font-bold text-yellow-100">MODE ADMIN AKTIF</div>}
       </div>
       <div className="px-5">
@@ -320,7 +353,7 @@ const App = () => {
           <div key={item.id} className="relative bg-white rounded-xl shadow-sm border border-gray-100 p-5 pl-6">
             <div className="absolute left-0 top-5 bottom-5 w-1.5 bg-orange-400 rounded-r-lg"></div>
             <div className="flex justify-between items-start mb-2"><h3 className="text-lg font-bold text-gray-800">{item.name}</h3><AdminControls type="kegiatan" item={item} /></div>
-            <div className="flex items-center gap-4 text-xs text-gray-500 mb-3"><span className="flex items-center gap-1"><Calendar size={12}/> {item.date}</span><span className="flex items-center gap-1"><Clock size={12}/> {item.time}</span></div>
+            <div className="flex items-center gap-4 text-xs text-gray-500 mb-3"><span className="flex items-center gap-1"><Calendar size={12} /> {item.date}</span><span className="flex items-center gap-1"><Clock size={12} /> {item.time}</span></div>
             <p className="text-sm text-gray-600 mb-4">{item.desc}</p>
             <div className="flex items-center gap-2 text-xs font-medium text-emerald-600 bg-emerald-50 w-fit px-3 py-1.5 rounded-lg"><MapPin size={12} /> {item.location}</div>
           </div>
@@ -331,7 +364,6 @@ const App = () => {
     </div>
   );
 
-  // --- MODALS (Login, Install, Share, Form) ---
   return (
     <div className="min-h-screen bg-gray-50 font-sans text-gray-900 max-w-md mx-auto shadow-2xl overflow-hidden relative">
       <div className="min-h-screen bg-gray-50">
@@ -341,8 +373,7 @@ const App = () => {
         {activeTab === 'kegiatan' && <ActivitiesView />}
       </div>
       <BottomNav />
-
-      {/* Modal Login Admin */}
+      {/* Modal Login */}
       {showLogin && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center px-4 backdrop-blur-sm">
           <div className="bg-white p-6 rounded-2xl w-full max-w-xs shadow-2xl">
@@ -355,8 +386,7 @@ const App = () => {
           </div>
         </div>
       )}
-
-      {/* Modal Form CRUD */}
+      {/* Modal CRUD */}
       {showModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center backdrop-blur-sm">
           <div className="bg-white w-full max-w-md p-6 rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -396,12 +426,11 @@ const App = () => {
           </div>
         </div>
       )}
-
-      {/* Modal Share & Install - (Logic sama, disingkat agar file tidak terlalu panjang) */}
+      {/* Modal Share & Install */}
       {showShare && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={() => setShowShare(false)}>
           <div className="bg-white rounded-2xl w-full max-w-sm" onClick={e => e.stopPropagation()}>
-            <div className="bg-emerald-600 p-4 text-white flex justify-between items-center"><h3 className="font-bold flex gap-2"><Share2 size={18}/> Bagikan</h3><button onClick={() => setShowShare(false)}><X size={20} /></button></div>
+            <div className="bg-emerald-600 p-4 text-white flex justify-between items-center"><h3 className="font-bold flex gap-2"><Share2 size={18} /> Bagikan</h3><button onClick={() => setShowShare(false)}><X size={20} /></button></div>
             <div className="p-6 space-y-3">
               <div className="bg-gray-50 p-4 rounded-xl text-xs whitespace-pre-wrap max-h-40 overflow-y-auto">{generateShareText()}</div>
               <button onClick={handleShareWA} className="w-full py-3 bg-[#25D366] text-white font-bold rounded-xl">WhatsApp</button>
@@ -410,13 +439,12 @@ const App = () => {
           </div>
         </div>
       )}
-
       {showInstall && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={() => setShowInstall(false)}>
           <div className="bg-white rounded-2xl p-6 max-w-sm text-center" onClick={e => e.stopPropagation()}>
-             <h3 className="text-xl font-bold mb-2">Install Aplikasi</h3>
-             <p className="text-sm text-gray-500 mb-4">Gunakan Chrome (Android) atau Safari (iOS) lalu pilih "Add to Home Screen".</p>
-             <button onClick={() => setShowInstall(false)} className="w-full py-3 bg-emerald-600 text-white font-bold rounded-xl">Tutup</button>
+            <h3 className="text-xl font-bold mb-2">Install Aplikasi</h3>
+            <p className="text-sm text-gray-500 mb-4">Gunakan Chrome (Android) atau Safari (iOS) lalu pilih "Add to Home Screen".</p>
+            <button onClick={() => setShowInstall(false)} className="w-full py-3 bg-emerald-600 text-white font-bold rounded-xl">Tutup</button>
           </div>
         </div>
       )}

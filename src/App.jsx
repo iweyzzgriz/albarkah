@@ -33,8 +33,8 @@ try {
 }
 
 // --- KONFIGURASI ADMIN ---
-const ADMIN_PIN = '1234';
-const ADMIN_WA = '628123456789';
+const ADMIN_PIN = 'Albarkah2026';
+const ADMIN_WA = '6285137666570';
 
 const App = () => {
   const [activeTab, setActiveTab] = useState('home');
